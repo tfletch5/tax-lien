@@ -239,17 +239,19 @@ export function DeKalbDashboard() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          {/* Mobile: Stack vertically, Desktop: Side by side */}
+          <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900">
                 DeKalb County Tax Lien Dashboard
               </h1>
               <p className="text-sm text-gray-600">
                 Tax lien investment analysis for DeKalb County, GA
               </p>
             </div>
-            <div className="flex items-center space-x-4">
+            {/* Action buttons - wrap on mobile */}
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4">
               <Button
                 onClick={handleEnrichProperties}
                 disabled={enriching || totalProperties === 0}
@@ -260,9 +262,16 @@ export function DeKalbDashboard() {
                 <Database
                   className={`h-4 w-4 mr-2 ${enriching ? "animate-pulse" : ""}`}
                 />
-                {enriching
-                  ? "Enriching..."
-                  : `Enrich Properties (${enrichmentStatus.enrichmentRate}%)`}
+                <span className="hidden sm:inline">
+                  {enriching
+                    ? "Enriching..."
+                    : `Enrich Properties (${enrichmentStatus.enrichmentRate}%)`}
+                </span>
+                <span className="sm:hidden">
+                  {enriching
+                    ? "..."
+                    : `Enrich (${enrichmentStatus.enrichmentRate}%)`}
+                </span>
               </Button>
               <Button
                 onClick={handleScrapeDeKalb}
@@ -271,16 +280,18 @@ export function DeKalbDashboard() {
                 size="sm"
               >
                 <RefreshCw
-                  className={`h-4 w-4 mr-2 ${scraping ? "animate-spin" : ""}`}
+                  className={`h-4 w-4 sm:mr-2 ${scraping ? "animate-spin" : ""}`}
                 />
-                {scraping ? "Scraping..." : "Scrape DeKalb"}
+                <span className="hidden sm:inline">
+                  {scraping ? "Scraping..." : "Scrape DeKalb"}
+                </span>
               </Button>
-              <span className="text-sm text-gray-600">
+              <span className="hidden md:inline text-sm text-gray-600">
                 Welcome, {user?.email}
               </span>
               <Button onClick={handleSignOut} variant="outline" size="sm">
-                <LogOut className="h-4 w-4 mr-2" />
-                Sign Out
+                <LogOut className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Sign Out</span>
               </Button>
             </div>
           </div>
