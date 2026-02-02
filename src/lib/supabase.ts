@@ -1,14 +1,16 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 // Debug environment variables
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-console.log("Supabase Debug:", {
-  supabaseUrl: supabaseUrl ? "SET" : "MISSING",
-  supabaseAnonKey: supabaseAnonKey ? "SET" : "MISSING",
-  nodeEnv: process.env.NODE_ENV,
-});
+if (process.env.NODE_ENV === "development") {
+  console.log("Supabase Debug:", {
+    supabaseUrl: supabaseUrl ? "SET" : "MISSING",
+    supabaseAnonKey: supabaseAnonKey ? "SET" : "MISSING",
+    nodeEnv: process.env.NODE_ENV,
+  });
+}
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error("Missing Supabase environment variables");
@@ -20,14 +22,28 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Singleton pattern to prevent multiple client instances
+let supabaseInstance: SupabaseClient | null = null;
+let supabaseAdminInstance: SupabaseClient | null = null;
 
-export const supabaseAdmin = createClient(
-  supabaseUrl,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey,
-  {
-    auth: {
-      persistSession: false,
-    },
-  },
-);
+export const supabase = (() => {
+  if (!supabaseInstance) {
+    supabaseInstance = createClient(supabaseUrl, supabaseAnonKey);
+  }
+  return supabaseInstance;
+})();
+
+export const supabaseAdmin = (() => {
+  if (!supabaseAdminInstance) {
+    supabaseAdminInstance = createClient(
+      supabaseUrl,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey,
+      {
+        auth: {
+          persistSession: false,
+        },
+      },
+    );
+  }
+  return supabaseAdminInstance;
+})();

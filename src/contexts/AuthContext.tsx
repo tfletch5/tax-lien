@@ -26,15 +26,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      } else {
+    // Timeout fallback to prevent infinite loading
+    const timeout = setTimeout(() => {
+      if (loading) {
+        console.warn("Auth loading timeout - forcing loading to false");
         setLoading(false);
       }
-    });
+    }, 5000);
+
+    // Get initial session
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          fetchProfile(session.user.id);
+        } else {
+          setLoading(false);
+        }
+      })
+      .catch((error) => {
+        console.error("Error getting session:", error);
+        setLoading(false);
+      });
 
     // Listen for auth changes
     const {
@@ -49,7 +63,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const fetchProfile = async (userId: string) => {
