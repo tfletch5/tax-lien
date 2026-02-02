@@ -47,6 +47,12 @@ export function DeKalbDashboard() {
     scoredProperties: 0,
     enrichmentRate: 0,
   });
+  const [searchFilters, setSearchFilters] = useState({
+    address: "",
+    owner: "",
+    taxDueOperator: "all" as "all" | "gt" | "lt" | "eq",
+    taxDueValue: "",
+  });
 
   useEffect(() => {
     fetchDeKalbData();
@@ -58,7 +64,7 @@ export function DeKalbDashboard() {
     if (!isInitialLoad && pagination.page > 0) {
       fetchDeKalbData();
     }
-  }, [pagination.page, sortBy, sortOrder]);
+  }, [pagination.page, sortBy, sortOrder, searchFilters]);
 
   const fetchDeKalbData = async () => {
     setLoading(true);
@@ -69,6 +75,18 @@ export function DeKalbDashboard() {
         sortBy,
         sortOrder,
       });
+
+      // Add search filters
+      if (searchFilters.address) {
+        params.append("address", searchFilters.address);
+      }
+      if (searchFilters.owner) {
+        params.append("owner", searchFilters.owner);
+      }
+      if (searchFilters.taxDueOperator !== "all" && searchFilters.taxDueValue) {
+        params.append("taxDueOperator", searchFilters.taxDueOperator);
+        params.append("taxDueValue", searchFilters.taxDueValue);
+      }
 
       const response = await fetch(`/api/scrape/dekalb?${params}`);
       const data = await response.json();
@@ -141,8 +159,30 @@ export function DeKalbDashboard() {
       setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
     } else {
       setSortBy(field);
-      setSortOrder("desc");
+      setSortOrder("asc");
     }
+  };
+
+  const handleSearchChange = (
+    field: keyof typeof searchFilters,
+    value: string,
+  ) => {
+    setSearchFilters((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+    // Reset to first page when searching
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  };
+
+  const handleClearSearch = () => {
+    setSearchFilters({
+      address: "",
+      owner: "",
+      taxDueOperator: "all",
+      taxDueValue: "",
+    });
+    setPagination((prev) => ({ ...prev, page: 1 }));
   };
 
   const handleSortClick = (e: React.MouseEvent, field: string) => {
@@ -304,7 +344,7 @@ export function DeKalbDashboard() {
         </div>
 
         {/* Instructions */}
-        <Card className="mb-8">
+        {/* <Card className="mb-8">
           <CardHeader>
             <CardTitle>Getting Started</CardTitle>
             <CardDescription>
@@ -328,7 +368,7 @@ export function DeKalbDashboard() {
               </p>
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
 
         {/* Tax Liens Table */}
         <Card>
@@ -339,6 +379,72 @@ export function DeKalbDashboard() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Address
+                </label>
+                <input
+                  type="text"
+                  placeholder="Search address..."
+                  value={searchFilters.address}
+                  onChange={(e) =>
+                    handleSearchChange("address", e.target.value)
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Owner
+                </label>
+                <input
+                  type="text"
+                  placeholder="Search owner..."
+                  value={searchFilters.owner}
+                  onChange={(e) => handleSearchChange("owner", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tax Due
+                </label>
+                <div className="flex space-x-2">
+                  <select
+                    value={searchFilters.taxDueOperator}
+                    onChange={(e) =>
+                      handleSearchChange("taxDueOperator", e.target.value)
+                    }
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">All</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="eq">=</option>
+                  </select>
+                  <input
+                    type="number"
+                    placeholder="Amount..."
+                    value={searchFilters.taxDueValue}
+                    onChange={(e) =>
+                      handleSearchChange("taxDueValue", e.target.value)
+                    }
+                    disabled={searchFilters.taxDueOperator === "all"}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                  />
+                </div>
+              </div>
+              <div className="flex items-end">
+                <Button
+                  onClick={handleClearSearch}
+                  variant="outline"
+                  className="w-full"
+                >
+                  Clear Search
+                </Button>
+              </div>
+            </div>
             {loading ? (
               <div className="text-center py-8">
                 Loading DeKalb tax lien data...

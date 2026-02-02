@@ -41,19 +41,83 @@ export async function GET(request: NextRequest) {
     const sortBy = searchParams.get("sortBy") || "scraped_at";
     const sortOrder = searchParams.get("sortOrder") || "desc";
 
+    // Search parameters
+    const address = searchParams.get("address") || "";
+    const owner = searchParams.get("owner") || "";
+    const taxDueOperator = searchParams.get("taxDueOperator") || "all";
+    const taxDueValue = searchParams.get("taxDueValue") || "";
+
     const offset = (page - 1) * limit;
 
     console.log(
       `GET: Fetching DeKalb tax liens... page ${page}, limit ${limit}`,
     );
 
-    // Get total count for pagination
+    // Build base query with search filters
+    let query = supabaseAdmin.from("tax_liens").select("*").eq("county_id", 1); // DeKalb County ID
+
+    // Apply search filters
+    if (address) {
+      query = query.ilike("property_address", `%${address}%`);
+    }
+    if (owner) {
+      query = query.ilike("owner_name", `%${owner}%`);
+    }
+    if (taxDueOperator !== "all" && taxDueValue) {
+      const taxAmount = parseFloat(taxDueValue);
+      if (!isNaN(taxAmount)) {
+        switch (taxDueOperator) {
+          case "gt":
+            query = query.gt("tax_amount_due", taxAmount);
+            break;
+          case "lt":
+            query = query.lt("tax_amount_due", taxAmount);
+            break;
+          case "eq":
+            query = query.eq("tax_amount_due", taxAmount);
+            break;
+        }
+      }
+    }
+
+    // Get total count for pagination with filters
     const { count: totalCount } = await supabaseAdmin
       .from("tax_liens")
       .select("*", { count: "exact", head: true })
       .eq("county_id", 1);
 
-    // Get total tax value for all properties (not just current page)
+    // Apply the same filters to count query
+    let countQuery = supabaseAdmin
+      .from("tax_liens")
+      .select("*", { count: "exact", head: true })
+      .eq("county_id", 1);
+
+    if (address) {
+      countQuery = countQuery.ilike("property_address", `%${address}%`);
+    }
+    if (owner) {
+      countQuery = countQuery.ilike("owner_name", `%${owner}%`);
+    }
+    if (taxDueOperator !== "all" && taxDueValue) {
+      const taxAmount = parseFloat(taxDueValue);
+      if (!isNaN(taxAmount)) {
+        switch (taxDueOperator) {
+          case "gt":
+            countQuery = countQuery.gt("tax_amount_due", taxAmount);
+            break;
+          case "lt":
+            countQuery = countQuery.lt("tax_amount_due", taxAmount);
+            break;
+          case "eq":
+            countQuery = countQuery.eq("tax_amount_due", taxAmount);
+            break;
+        }
+      }
+    }
+
+    const { count: filteredCount } = await countQuery;
+
+    // Get total tax value for all properties (not filtered)
     const { data: allTaxLiens, error: taxValueError } = await supabaseAdmin
       .from("tax_liens")
       .select("tax_amount_due")
@@ -63,11 +127,59 @@ export async function GET(request: NextRequest) {
       allTaxLiens?.reduce((sum, lien) => sum + (lien.tax_amount_due || 0), 0) ||
       0;
 
-    // First try a simple query without joins with pagination
-    const { data: simpleTaxLiens, error: simpleError } = await supabaseAdmin
+    // Get filtered tax value (for search results)
+    let filteredTaxValueQuery = supabaseAdmin
       .from("tax_liens")
-      .select("*")
-      .eq("county_id", 1) // DeKalb County ID
+      .select("tax_amount_due")
+      .eq("county_id", 1);
+
+    if (address) {
+      filteredTaxValueQuery = filteredTaxValueQuery.ilike(
+        "property_address",
+        `%${address}%`,
+      );
+    }
+    if (owner) {
+      filteredTaxValueQuery = filteredTaxValueQuery.ilike(
+        "owner_name",
+        `%${owner}%`,
+      );
+    }
+    if (taxDueOperator !== "all" && taxDueValue) {
+      const taxAmount = parseFloat(taxDueValue);
+      if (!isNaN(taxAmount)) {
+        switch (taxDueOperator) {
+          case "gt":
+            filteredTaxValueQuery = filteredTaxValueQuery.gt(
+              "tax_amount_due",
+              taxAmount,
+            );
+            break;
+          case "lt":
+            filteredTaxValueQuery = filteredTaxValueQuery.lt(
+              "tax_amount_due",
+              taxAmount,
+            );
+            break;
+          case "eq":
+            filteredTaxValueQuery = filteredTaxValueQuery.eq(
+              "tax_amount_due",
+              taxAmount,
+            );
+            break;
+        }
+      }
+    }
+
+    const { data: filteredTaxLiens } = await filteredTaxValueQuery;
+    const filteredTaxValue =
+      filteredTaxLiens?.reduce(
+        (sum, lien) => sum + (lien.tax_amount_due || 0),
+        0,
+      ) || 0;
+
+    // Apply sorting and pagination to main query
+    const { data: simpleTaxLiens, error: simpleError } = await query
       .order(sortBy, { ascending: sortOrder === "asc" })
       .range(offset, offset + limit - 1);
 
@@ -98,7 +210,8 @@ export async function GET(request: NextRequest) {
     let taxLiens = simpleTaxLiens;
 
     if (simpleTaxLiens && simpleTaxLiens.length > 0) {
-      const { data: complexTaxLiens, error: complexError } = await supabaseAdmin
+      // Build complex query with same filters
+      let complexQuery = supabaseAdmin
         .from("tax_liens")
         .select(
           `
@@ -108,7 +221,33 @@ export async function GET(request: NextRequest) {
           investment_score:investment_scores(*)
         `,
         )
-        .eq("county_id", 1)
+        .eq("county_id", 1);
+
+      // Apply same search filters to complex query
+      if (address) {
+        complexQuery = complexQuery.ilike("property_address", `%${address}%`);
+      }
+      if (owner) {
+        complexQuery = complexQuery.ilike("owner_name", `%${owner}%`);
+      }
+      if (taxDueOperator !== "all" && taxDueValue) {
+        const taxAmount = parseFloat(taxDueValue);
+        if (!isNaN(taxAmount)) {
+          switch (taxDueOperator) {
+            case "gt":
+              complexQuery = complexQuery.gt("tax_amount_due", taxAmount);
+              break;
+            case "lt":
+              complexQuery = complexQuery.lt("tax_amount_due", taxAmount);
+              break;
+            case "eq":
+              complexQuery = complexQuery.eq("tax_amount_due", taxAmount);
+              break;
+          }
+        }
+      }
+
+      const { data: complexTaxLiens, error: complexError } = await complexQuery
         .order(sortBy, { ascending: sortOrder === "asc" })
         .range(offset, offset + limit - 1);
 
@@ -131,7 +270,7 @@ export async function GET(request: NextRequest) {
       .order("started_at", { ascending: false })
       .limit(5);
 
-    const totalPages = Math.ceil((totalCount || 0) / limit);
+    const totalPages = Math.ceil((filteredCount || 0) / limit);
 
     console.log(
       `GET: Returning ${taxLiens?.length || 0} tax liens for DeKalb (page ${page} of ${totalPages})`,
@@ -142,11 +281,11 @@ export async function GET(request: NextRequest) {
       taxLiens: taxLiens || [],
       recentLogs: scrapeLogs || [],
       totalProperties: totalCount || 0,
-      totalTaxValue: totalTaxValue,
+      totalTaxValue: filteredTaxValue,
       pagination: {
         page,
         limit,
-        totalCount: totalCount || 0,
+        totalCount: filteredCount || 0,
         totalPages,
       },
     });
