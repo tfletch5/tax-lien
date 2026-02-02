@@ -10,6 +10,17 @@ export interface ScrapedTaxLien {
   tax_amount_due: number;
   sale_date?: string;
   legal_description?: string;
+  tax_sale_date?: string;
+  map_ref?: string;
+  tax_sale_id?: string;
+  tenant?: string;
+  defendant?: string;
+  levy_type?: string;
+  lien_book?: string;
+  page?: string;
+  levy_date?: string;
+  min_year?: number;
+  max_year?: number;
 }
 
 export abstract class BaseScraper {
@@ -41,28 +52,49 @@ export abstract class BaseScraper {
 
       logData = data;
 
-      // Insert tax liens with upsert to handle duplicates
-      const taxLienPromises = liens.map(async (lien) => {
-        return supabaseAdmin.from("tax_liens").upsert(
-          {
-            county_id: this.countyId,
-            parcel_id: lien.parcel_id,
-            owner_name: lien.owner_name,
-            property_address: lien.property_address,
-            city: lien.city,
-            zip: lien.zip,
-            tax_amount_due: lien.tax_amount_due,
-            sale_date: lien.sale_date,
-            legal_description: lien.legal_description,
-            scraped_at: new Date().toISOString(),
-          },
-          {
-            onConflict: "county_id,parcel_id",
-          },
-        );
-      });
+      console.log(
+        `Attempting to save ${liens.length} tax liens to database...`,
+      );
 
-      await Promise.all(taxLienPromises);
+      // Insert tax liens one by one to better handle errors
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const lien of liens) {
+        try {
+          const { error } = await supabaseAdmin.from("tax_liens").upsert(
+            {
+              county_id: this.countyId,
+              parcel_id: lien.parcel_id,
+              owner_name: lien.owner_name,
+              property_address: lien.property_address,
+              city: lien.city,
+              zip: lien.zip,
+              tax_amount_due: lien.tax_amount_due,
+              sale_date: lien.sale_date,
+              legal_description: lien.legal_description,
+              scraped_at: new Date().toISOString(),
+            },
+            {
+              onConflict: "county_id,parcel_id",
+            },
+          );
+
+          if (error) {
+            console.error(`Error inserting lien ${lien.parcel_id}:`, error);
+            errorCount++;
+          } else {
+            successCount++;
+          }
+        } catch (err) {
+          console.error(`Exception inserting lien ${lien.parcel_id}:`, err);
+          errorCount++;
+        }
+      }
+
+      console.log(
+        `Database save complete: ${successCount} successful, ${errorCount} failed`,
+      );
 
       // Update scrape log
       await supabaseAdmin
@@ -74,7 +106,7 @@ export abstract class BaseScraper {
         .eq("id", logData.id);
 
       console.log(
-        `Successfully scraped ${liens.length} tax liens for ${this.countyName}`,
+        `Successfully scraped ${liens.length} tax liens for ${this.countyName} (${successCount} saved to database)`,
       );
     } catch (error) {
       console.error(`Error scraping ${this.countyName}:`, error);

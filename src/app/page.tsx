@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/contexts/AuthContext";
 import { AuthForm } from "@/components/auth/AuthForm";
-import { Dashboard } from "@/components/dashboard/Dashboard";
+import { DeKalbDashboard } from "@/components/dashboard/DeKalbDashboard";
 
 export default function Home() {
   const { user, loading } = useAuth();
@@ -19,5 +19,5 @@ export default function Home() {
     return <AuthForm />;
   }
 
-  return <Dashboard />;
+  return <DeKalbDashboard />;
 }
