@@ -252,7 +252,7 @@ export function DeKalbDashboard() {
             </div>
             {/* Action buttons - wrap on mobile */}
             <div className="flex flex-wrap items-center gap-2 sm:gap-4">
-              <Button
+              {/* <Button
                 onClick={handleEnrichProperties}
                 disabled={enriching || totalProperties === 0}
                 variant="default"
@@ -272,7 +272,7 @@ export function DeKalbDashboard() {
                     ? "..."
                     : `Enrich (${enrichmentStatus.enrichmentRate}%)`}
                 </span>
-              </Button>
+              </Button> */}
               <Button
                 onClick={handleScrapeDeKalb}
                 disabled={scraping}
