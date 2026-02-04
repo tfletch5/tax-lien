@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
       // Enrich specific property
       const { data: taxLien } = await supabaseAdmin
         .from("tax_liens")
-        .select("property_address, city, zip")
+        .select("parcel_id")
         .eq("id", taxLienId)
         .single();
 
@@ -26,9 +26,7 @@ export async function POST(request: NextRequest) {
 
       await realEstateService.enrichProperty(
         taxLienId,
-        taxLien.property_address,
-        taxLien.city || undefined,
-        taxLien.zip || undefined,
+        taxLien.parcel_id
       );
 
       return NextResponse.json({

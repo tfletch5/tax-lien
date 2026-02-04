@@ -142,7 +142,7 @@ export function Dashboard() {
           </CardHeader>
           <CardContent>
             <Select value={selectedCounty} onValueChange={setSelectedCounty}>
-              <SelectTrigger className="w-full md:w-[200px]">
+              <SelectTrigger className="w-full md:w-50">
                 <SelectValue placeholder="Select a county" />
               </SelectTrigger>
               <SelectContent>

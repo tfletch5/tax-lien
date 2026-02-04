@@ -462,13 +462,11 @@ export class RealEstateService {
         .select(
           `
           id,
-          property_address,
-          city,
-          zip,
+          parcel_id,
           properties(id)
         `,
         )
-        .is("properties.id", null)
+        .is("properties.id", null) 
         .limit(100); // Process in batches
 
       if (!taxLiens || taxLiens.length === 0) {
@@ -487,7 +485,7 @@ export class RealEstateService {
           batch.map((lien) =>
             this.enrichProperty(
               lien.id,
-              lien.property_address || lien.parcel_id || "",
+              lien.parcel_id
             ),
           ),
         );

@@ -593,7 +593,7 @@ export function DeKalbDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {taxLiens.map((lien) => (
+                      {taxLiens.map((lien: any) => (
                         <tr
                           key={lien.id}
                           className="border-b hover:bg-blue-50 hover:shadow-sm transition-all duration-150 cursor-pointer"
