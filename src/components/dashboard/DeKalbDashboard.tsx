@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { formatCurrency, formatPercent } from "@/lib/utils";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   LogOut,
   TrendingUp,
@@ -23,6 +24,7 @@ import {
   ChevronRight,
   ArrowUpDown,
   Database,
+  Info,
 } from "lucide-react";
 
 export function DeKalbDashboard() {
@@ -36,7 +38,7 @@ export function DeKalbDashboard() {
     totalCount: 0,
     totalPages: 0,
   });
-  const [sortBy, setSortBy] = useState("scraped_at");
+  const [sortBy, setSortBy] = useState("property_confidence");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [totalTaxValue, setTotalTaxValue] = useState(0);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -252,7 +254,7 @@ export function DeKalbDashboard() {
             </div>
             {/* Action buttons - wrap on mobile */}
             <div className="flex flex-wrap items-center gap-2 sm:gap-4">
-              {/* <Button
+              <Button
                 onClick={handleEnrichProperties}
                 disabled={enriching || totalProperties === 0}
                 variant="default"
@@ -272,7 +274,7 @@ export function DeKalbDashboard() {
                     ? "..."
                     : `Enrich (${enrichmentStatus.enrichmentRate}%)`}
                 </span>
-              </Button> */}
+              </Button>
               <Button
                 onClick={handleScrapeDeKalb}
                 disabled={scraping}
@@ -493,9 +495,13 @@ export function DeKalbDashboard() {
                         >
                           <div className="flex items-center">
                             Property Address
-                            {sortBy === "property_address" && (
-                              <ArrowUpDown className="ml-1 h-3 w-3" />
-                            )}
+                            <ArrowUpDown 
+                              className={`ml-1 h-3 w-3 ${
+                                sortBy === "property_address" 
+                                  ? "text-gray-900" 
+                                  : "text-gray-400"
+                              }`} 
+                            />
                           </div>
                         </th>
                         <th
@@ -504,30 +510,85 @@ export function DeKalbDashboard() {
                         >
                           <div className="flex items-center">
                             Owner
-                            {sortBy === "owner_name" && (
-                              <ArrowUpDown className="ml-1 h-3 w-3" />
-                            )}
+                            <ArrowUpDown 
+                              className={`ml-1 h-3 w-3 ${
+                                sortBy === "owner_name" 
+                                  ? "text-gray-900" 
+                                  : "text-gray-400"
+                              }`} 
+                            />
                           </div>
                         </th>
                         <th
-                          className="text-right py-3 px-4 font-medium cursor-pointer hover:bg-gray-50"
+                          className="text-right py-3 px-4 font-medium cursor-pointer hover:bg-gray-100 transition-colors"
                           onClick={(e) => handleSortClick(e, "tax_amount_due")}
                         >
                           <div className="flex items-center justify-end">
                             Tax Due
-                            {sortBy === "tax_amount_due" && (
-                              <ArrowUpDown className="ml-1 h-3 w-3" />
-                            )}
+                            <ArrowUpDown 
+                              className={`ml-1 h-3 w-3 ${
+                                sortBy === "tax_amount_due" 
+                                  ? "text-gray-900" 
+                                  : "text-gray-400"
+                              }`} 
+                            />
                           </div>
                         </th>
                         <th className="text-right py-3 px-4 font-medium">
                           Est. Value
                         </th>
                         <th className="text-right py-3 px-4 font-medium">
-                          LTV
+                          <div className="flex items-center justify-end gap-1">
+                            LTV
+                            <Tooltip 
+                              content="Loan-to-Value ratio: The percentage of the property's estimated value that is covered by mortgage debt plus the tax lien. Lower LTV (under 70%) indicates better investment opportunity as there's more equity in the property."
+                              position="bottom"
+                            >
+                              <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600 cursor-help" />
+                            </Tooltip>
+                          </div>
                         </th>
-                        <th className="text-right py-3 px-4 font-medium">
-                          Score
+                        <th
+                          className="text-right py-3 px-4 font-medium cursor-pointer hover:bg-gray-100 transition-colors"
+                          onClick={(e) => handleSortClick(e, "property_confidence")}
+                        >
+                          <div className="flex items-center justify-end gap-1">
+                            Confidence
+                            <ArrowUpDown 
+                              className={`h-3 w-3 ${
+                                sortBy === "property_confidence" 
+                                  ? "text-gray-900" 
+                                  : "text-gray-400"
+                              }`} 
+                            />
+                            <Tooltip 
+                              content="Property Valuation Confidence: A score (0-100) from the Real Estate API indicating how reliable the Automated Valuation Model (AVM) estimate is. Higher scores mean more reliable property value data. Green (80+), Yellow (60-79), Red (&lt;60)."
+                              position="bottom"
+                            >
+                              <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600 cursor-help" />
+                            </Tooltip>
+                          </div>
+                        </th>
+                        <th
+                          className="text-right py-3 px-4 font-medium cursor-pointer hover:bg-gray-100 transition-colors"
+                          onClick={(e) => handleSortClick(e, "investment_score")}
+                        >
+                          <div className="flex items-center justify-end gap-1">
+                            Investment Score
+                            <ArrowUpDown 
+                              className={`h-3 w-3 ${
+                                sortBy === "investment_score" 
+                                  ? "text-gray-900" 
+                                  : "text-gray-400"
+                              }`} 
+                            />
+                            <Tooltip 
+                              content="Investment Opportunity Score: A comprehensive score (1-100) that evaluates the tax lien as an investment opportunity. Based on LTV (30%), equity (25%), tax-to-value ratio (20%), property type (10%), location (10%), and data recency (5%). Higher scores indicate better investment opportunities. Green (80+), Yellow (60-79), Red (&lt;60)."
+                              position="bottom"
+                            >
+                              <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600 cursor-help" />
+                            </Tooltip>
+                          </div>
                         </th>
                       </tr>
                     </thead>
@@ -561,20 +622,37 @@ export function DeKalbDashboard() {
                               : "N/A"}
                           </td>
                           <td className="py-3 px-4 text-right text-gray-600">
-                            {lien.investment_score?.ltv !== undefined
+                            {lien.investment_score?.ltv !== undefined && lien.investment_score.ltv !== null
                               ? formatPercent(lien.investment_score.ltv)
                               : "N/A"}
                           </td>
                           <td className="py-3 px-4 text-right">
-                            {lien.investment_score?.investment_score ? (
+                            {lien.property?.confidence ? (
+                              <span
+                                className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                  lien.property.confidence >= 80
+                                    ? "bg-green-100 text-green-800"
+                                    : lien.property.confidence >=
+                                        60
+                                      ? "bg-yellow-100 text-yellow-800"
+                                      : "bg-red-100 text-red-800"
+                                }`}
+                              >
+                                {lien.property.confidence}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400 text-xs">N/A</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            {lien.investment_score?.investment_score !== undefined ? (
                               <span
                                 className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                                   lien.investment_score.investment_score >= 80
                                     ? "bg-green-100 text-green-800"
-                                    : lien.investment_score.investment_score >=
-                                        60
-                                      ? "bg-yellow-100 text-yellow-800"
-                                      : "bg-red-100 text-red-800"
+                                    : lien.investment_score.investment_score >= 60
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : "bg-red-100 text-red-800"
                                 }`}
                               >
                                 {lien.investment_score.investment_score}

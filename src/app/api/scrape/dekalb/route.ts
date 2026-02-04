@@ -53,8 +53,19 @@ export async function GET(request: NextRequest) {
       `GET: Fetching DeKalb tax liens... page ${page}, limit ${limit}`,
     );
 
-    // Build base query with search filters
-    let query = supabaseAdmin.from("tax_liens").select("*").eq("county_id", 1); // DeKalb County ID
+    // Build base query with search filters and joins
+    // Always include joins to get property and investment_score data
+    let query = supabaseAdmin
+      .from("tax_liens")
+      .select(
+        `
+        *,
+        county:counties(name),
+        property:properties(*),
+        investment_score:investment_scores(*)
+      `,
+      )
+      .eq("county_id", 1); // DeKalb County ID
 
     // Apply search filters
     if (address) {
@@ -179,86 +190,124 @@ export async function GET(request: NextRequest) {
       ) || 0;
 
     // Apply sorting and pagination to main query
-    const { data: simpleTaxLiens, error: simpleError } = await query
-      .order(sortBy, { ascending: sortOrder === "asc" })
-      .range(offset, offset + limit - 1);
-
-    console.log("Simple query result:", {
-      count: simpleTaxLiens?.length || 0,
-      error: simpleError,
-      totalCount,
-    });
-
-    if (simpleError) {
-      console.error("Simple query failed:", simpleError);
-      return NextResponse.json({
-        county: "DeKalb",
-        taxLiens: [],
-        recentLogs: [],
-        totalProperties: 0,
-        pagination: {
-          page,
-          limit,
-          totalCount: 0,
-          totalPages: 0,
-        },
-        error: simpleError.message,
-      });
+    // Note: Can't sort by nested fields directly, so we'll handle property_confidence and investment_score separately
+    let sortField = sortBy;
+    if (sortBy === "property_confidence" || sortBy === "investment_score") {
+      sortField = "scraped_at"; // Use a default sort for the query, we'll sort by nested field after
     }
+    
+    let taxLiens: any[] = [];
 
-    // If simple query works, try the complex query
-    let taxLiens = simpleTaxLiens;
-
-    if (simpleTaxLiens && simpleTaxLiens.length > 0) {
-      // Build complex query with same filters
-      let complexQuery = supabaseAdmin
-        .from("tax_liens")
-        .select(
-          `
-          *,
-          county:counties(name),
-          property:properties(*),
-          investment_score:investment_scores(*)
-        `,
-        )
-        .eq("county_id", 1);
-
-      // Apply same search filters to complex query
-      if (address) {
-        complexQuery = complexQuery.ilike("property_address", `%${address}%`);
-      }
-      if (owner) {
-        complexQuery = complexQuery.ilike("owner_name", `%${owner}%`);
-      }
-      if (taxDueOperator !== "all" && taxDueValue) {
-        const taxAmount = parseFloat(taxDueValue);
-        if (!isNaN(taxAmount)) {
-          switch (taxDueOperator) {
-            case "gt":
-              complexQuery = complexQuery.gt("tax_amount_due", taxAmount);
-              break;
-            case "lt":
-              complexQuery = complexQuery.lt("tax_amount_due", taxAmount);
-              break;
-            case "eq":
-              complexQuery = complexQuery.eq("tax_amount_due", taxAmount);
-              break;
+    // Handle sorting by nested property fields (like confidence or investment_score)
+    if (sortBy === "property_confidence" || sortBy === "investment_score") {
+      // Fetch all matching records first (we'll sort and paginate in memory)
+      const { data: allTaxLiens, error: allError } = await query;
+      
+      if (!allError && allTaxLiens) {
+        // Normalize investment_score data first (handle case where it might be an array)
+        const normalizedAllTaxLiens = allTaxLiens.map((lien: any) => {
+          // If investment_score is an array, take the first element
+          if (Array.isArray(lien.investment_score)) {
+            lien.investment_score = lien.investment_score[0] || null;
           }
+          return lien;
+        });
+        
+        // Sort by the appropriate nested field
+        normalizedAllTaxLiens.sort((a: any, b: any) => {
+          let aValue: number | null = null;
+          let bValue: number | null = null;
+          
+          if (sortBy === "property_confidence") {
+            aValue = a.property?.confidence ?? null;
+            bValue = b.property?.confidence ?? null;
+          } else if (sortBy === "investment_score") {
+            aValue = a.investment_score?.investment_score ?? null;
+            bValue = b.investment_score?.investment_score ?? null;
+          }
+          
+          // Handle null values - put them at the end
+          if (aValue === null && bValue === null) return 0;
+          if (aValue === null) return 1; // a goes to end
+          if (bValue === null) return -1; // b goes to end
+          
+          // Sort by value
+          if (sortOrder === "desc") {
+            return bValue - aValue; // Higher value first
+          } else {
+            return aValue - bValue; // Lower value first
+          }
+        });
+        
+        // Apply pagination after sorting
+        taxLiens = normalizedAllTaxLiens.slice(offset, offset + limit);
+        console.log(`Sorted by ${sortBy} in memory`);
+      } else {
+        console.error("Error fetching all records for confidence sort:", allError);
+        if (allError) {
+          return NextResponse.json({
+            county: "DeKalb",
+            taxLiens: [],
+            recentLogs: [],
+            totalProperties: 0,
+            pagination: {
+              page,
+              limit,
+              totalCount: 0,
+              totalPages: 0,
+            },
+            error: allError.message,
+          });
         }
       }
-
-      const { data: complexTaxLiens, error: complexError } = await complexQuery
-        .order(sortBy, { ascending: sortOrder === "asc" })
+    } else {
+      // Normal sorting for non-nested fields
+      const { data: queryTaxLiens, error: queryError } = await query
+        .order(sortField, { ascending: sortOrder === "asc" })
         .range(offset, offset + limit - 1);
 
-      if (!complexError) {
-        taxLiens = complexTaxLiens;
-        console.log("Complex query succeeded");
-      } else {
-        console.log(
-          "Complex query failed, using simple results:",
-          complexError.message,
-        );
+      if (queryError) {
+        console.error("Query failed:", queryError);
+        return NextResponse.json({
+          county: "DeKalb",
+          taxLiens: [],
+          recentLogs: [],
+          totalProperties: 0,
+          pagination: {
+            page,
+            limit,
+            totalCount: 0,
+            totalPages: 0,
+          },
+          error: queryError.message,
+        });
+      }
+
+      taxLiens = queryTaxLiens || [];
+      console.log(`Query succeeded: ${taxLiens.length} records returned`);
+      
+      // Normalize investment_score data (handle case where it might be an array)
+      taxLiens = taxLiens.map((lien: any) => {
+        // If investment_score is an array, take the first element
+        if (Array.isArray(lien.investment_score)) {
+          lien.investment_score = lien.investment_score[0] || null;
+        }
+        return lien;
+      });
+      
+      // Debug: Check if investment_score data is present
+      if (taxLiens.length > 0) {
+        const sampleWithScore = taxLiens.find((l: any) => l.investment_score);
+        const sampleWithoutScore = taxLiens.find((l: any) => !l.investment_score);
+        if (sampleWithScore) {
+          console.log('Sample with investment_score:', {
+            ltv: sampleWithScore.investment_score?.ltv,
+            investment_score: sampleWithScore.investment_score?.investment_score,
+            hasLTV: sampleWithScore.investment_score?.ltv !== undefined && sampleWithScore.investment_score?.ltv !== null
+          });
+        }
+        console.log(`Records with investment_score: ${taxLiens.filter((l: any) => l.investment_score).length}/${taxLiens.length}`);
+        console.log(`Records with LTV: ${taxLiens.filter((l: any) => l.investment_score?.ltv !== undefined && l.investment_score?.ltv !== null).length}/${taxLiens.length}`);
       }
     }
 
@@ -270,10 +319,19 @@ export async function GET(request: NextRequest) {
       .order("started_at", { ascending: false })
       .limit(5);
 
-    const totalPages = Math.ceil((filteredCount || 0) / limit);
+    // If sorting by confidence, we need to recalculate total count after filtering
+    // (since we fetched all records for sorting)
+    let finalTotalCount = filteredCount || 0;
+    let finalTotalPages = Math.ceil(finalTotalCount / limit);
+    
+    // If we sorted by confidence in memory, the count is already correct
+    if (sortBy === "property_confidence" && taxLiens) {
+      // Count is already filtered, just calculate pages
+      finalTotalPages = Math.ceil(finalTotalCount / limit);
+    }
 
     console.log(
-      `GET: Returning ${taxLiens?.length || 0} tax liens for DeKalb (page ${page} of ${totalPages})`,
+      `GET: Returning ${taxLiens?.length || 0} tax liens for DeKalb (page ${page} of ${finalTotalPages})`,
     );
 
     return NextResponse.json({
@@ -285,8 +343,8 @@ export async function GET(request: NextRequest) {
       pagination: {
         page,
         limit,
-        totalCount: filteredCount || 0,
-        totalPages,
+        totalCount: finalTotalCount,
+        totalPages: finalTotalPages,
       },
     });
   } catch (error) {

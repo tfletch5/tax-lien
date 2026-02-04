@@ -33,102 +33,66 @@ export class RealEstateService {
 
   async enrichProperty(
     taxLienId: string,
-    address: string,
-    city?: string,
-    zip?: string,
+    parcelId: string
   ): Promise<void> {
     try {
-      console.log(`Enriching property: ${address}`);
+      console.log(`Enriching property: ${parcelId}`);
 
-      const fullAddress = [address, city, zip].filter(Boolean).join(", ");
-      console.log(`Full address: ${fullAddress}`);
-
-      // Try different API endpoints and formats
-      const endpoints = [
-        {
+      const urls = {
+        "search": {
           url: `${this.baseUrl}/PropertySearch`,
-          params: { address: fullAddress, apiKey: this.apiKey },
+          params: { apn: parcelId, state: "GA" }
         },
-        // {
-        //   url: `${this.baseUrl}/properties`,
-        //   params: { address: fullAddress, apiKey: this.apiKey },
-        // },
-        // {
-        //   url: "https://api.realestateapi.com/v2/property",
-        //   params: { address: fullAddress, apiKey: this.apiKey },
-        // },
-        // {
-        //   url: "https://realestateapi.com/v2/property",
-        //   params: { address: fullAddress, apiKey: this.apiKey },
-        // },
-      ];
-
+        "valuation": {
+          url: `${this.baseUrl}/PropertyAvm`,
+          params: {}
+        },
+      }
+      //  assessedImprovementValue if this 0 skip it
+      
       let propertyData: any = null;
       let lastError: any = null;
 
-      for (const endpoint of endpoints) {
-        try {
-          console.log(`Trying endpoint: ${endpoint.url}`);
+      try {
+        console.log(`Trying endpoint: ${urls.search.url}`);
 
-          const response = await axios.post(
-            endpoint.url,
-            {
-              street: fullAddress,
-              state: "GA",
+        const response = await axios.post(
+          urls.search.url,
+          urls.search.params,
+          {
+            headers: {
+              "x-api-key": this.apiKey,
             },
-            {
-              headers: {
-                Accept: "application/json",
-                "User-Agent": "TaxLienDashboard/1.0",
-                "x-api-key": this.apiKey,
-              },
-              timeout: 10000,
-            },
-          );
+          }
+        );
 
-          console.log(`✅ Success with ${endpoint.url}:`, response.status);
+        console.log(`✅ Success with ${urls.search.url}:`, response.status);
+        console.log(`Response data structure:`, JSON.stringify(response.data, null, 2));
 
-          // Handle the RealEstateAPI response format
-          if (
-            response.data &&
-            response.data.data &&
-            Array.isArray(response.data.data)
-          ) {
-            // Find the best matching property from the array
-            const properties = response.data.data;
-            const bestMatch =
-              properties.find(
-                (prop: any) =>
-                  prop.address &&
-                  prop.address.street &&
-                  prop.address.street
-                    .toLowerCase()
-                    .includes(address.toLowerCase().split(" ")[0]),
-              ) || properties[0]; // Use first property if no good match
-
-            propertyData = bestMatch;
-            console.log(
-              `Found ${properties.length} properties, selected best match`,
-            );
+        // Handle the RealEstateAPI response format
+        if (response.data && response.data.data) {
+          // Check if data is an array (PropertySearch might return multiple results)
+          if (Array.isArray(response.data.data)) {
+            // Use the first property from the array
+            propertyData = response.data.data[0];
           } else {
-            // Fallback to direct response if it's not an array format
-            propertyData = response.data;
+            propertyData = response.data.data;
           }
+        }
 
-          if (propertyData) {
-            break;
-          }
-        } catch (error: any) {
-          console.log(
-            `❌ Failed with ${endpoint.url}:`,
-            error.response?.status || error.message,
-          );
-          lastError = error;
+        if (!propertyData) {
+          throw new Error("Failed to get property data");
+        }
+      } catch (error: any) {
+        console.log(
+          `❌ Failed with ${urls.search.url}:`,
+          error.response?.status || error.message,
+        );
+        lastError = error;
 
-          if (error.response?.status !== 404) {
-            // For non-404 errors, don't try other endpoints
-            throw error;
-          }
+        if (error.response?.status !== 404) {
+          // For non-404 errors, don't try other endpoints
+          throw error;
         }
       }
 
@@ -136,88 +100,329 @@ export class RealEstateService {
         throw lastError || new Error("All API endpoints failed");
       }
 
-      // Save property details to database
-      await supabaseAdmin.from("properties").upsert(
-        {
-          tax_lien_id: taxLienId,
-          estimated_value: propertyData.estimatedValue || 0,
-          last_sale_price: propertyData.lastSaleAmount
-            ? parseFloat(propertyData.lastSaleAmount)
-            : 0,
-          last_sale_date: propertyData.lastSaleDate || null,
-          year_built: propertyData.yearBuilt || null,
-          bedrooms: propertyData.bedrooms || null,
-          bathrooms: propertyData.bathrooms || null,
-          sqft: propertyData.squareFeet || 0,
-          lot_size_sqft: propertyData.lotSquareFeet || 0,
-          property_type:
-            propertyData.propertyType || propertyData.propertyUse || null,
-          mortgage_balance: propertyData.openMortgageBalance || 0,
-          enriched_at: new Date().toISOString(),
-        },
+      // Skip if assessedImprovementValue is 0 (as per comment)
+      if (propertyData.assessedImprovementValue === 0 || propertyData.assessedImprovementValue === "0") {
+        console.log(`⚠️ Skipping property with assessedImprovementValue = 0`);
+        return;
+      }
+
+      // Map API response fields to database fields
+      // The API field names might vary, so we'll try multiple possible field names
+      const propertyRecord: any = {
+        tax_lien_id: taxLienId,
+        enriched_at: new Date().toISOString(),
+      };
+
+      // Estimated value - try multiple field names
+      propertyRecord.estimated_value = 
+        propertyData.estimatedValue || 
+        propertyData.estimated_value || 
+        propertyData.avm ||
+        propertyData.assessedValue ||
+        0;
+
+      // Last sale price
+      propertyRecord.last_sale_price = 
+        propertyData.lastSaleAmount ? parseFloat(propertyData.lastSaleAmount) :
+        propertyData.lastSalePrice ? parseFloat(propertyData.lastSalePrice) :
+        propertyData.last_sale_price ? parseFloat(propertyData.last_sale_price) :
+        0;
+
+      // Last sale date
+      propertyRecord.last_sale_date = 
+        propertyData.lastSaleDate || 
+        propertyData.last_sale_date || 
+        null;
+
+      // Year built
+      propertyRecord.year_built = 
+        propertyData.yearBuilt || 
+        propertyData.year_built || 
+        null;
+
+      // Bedrooms
+      propertyRecord.bedrooms = 
+        propertyData.bedrooms || 
+        propertyData.bedroomCount ||
+        null;
+
+      // Bathrooms
+      propertyRecord.bathrooms = 
+        propertyData.bathrooms || 
+        propertyData.bathroomCount ||
+        null;
+
+      // Square feet
+      propertyRecord.sqft = 
+        propertyData.squareFeet || 
+        propertyData.sqft || 
+        propertyData.square_feet ||
+        propertyData.livingArea ||
+        0;
+
+      // Lot size
+      propertyRecord.lot_size_sqft = 
+        propertyData.lotSquareFeet || 
+        propertyData.lot_size_sqft ||
+        propertyData.lotSize ||
+        0;
+
+      // Property type
+      propertyRecord.property_type = 
+        propertyData.propertyType || 
+        propertyData.propertyUse || 
+        propertyData.property_type ||
+        null;
+
+      // Mortgage balance
+      propertyRecord.mortgage_balance = 
+        propertyData.openMortgageBalance ? parseFloat(propertyData.openMortgageBalance) :
+        propertyData.mortgageBalance ? parseFloat(propertyData.mortgageBalance) :
+        propertyData.mortgage_balance ? parseFloat(propertyData.mortgage_balance) :
+        0;
+
+      console.log(`Saving property record:`, JSON.stringify(propertyRecord, null, 2));
+
+      // Try upsert first (if unique constraint exists)
+      let { error: upsertError } = await supabaseAdmin.from("properties").upsert(
+        propertyRecord,
         {
           onConflict: "tax_lien_id",
         },
       );
 
-      // Get tax lien data for investment calculations
-      const { data: taxLien } = await supabaseAdmin
-        .from("tax_liens")
-        .select("tax_amount_due, county_id")
-        .eq("id", taxLienId)
-        .single();
-
-      if (taxLien && propertyData.estimatedValue > 0) {
-        // Calculate investment metrics
-        const mortgageBalance = propertyData.mortgageBalance || 0;
-        const ltv = calculateLTV(
-          mortgageBalance,
-          taxLien.tax_amount_due,
-          propertyData.estimatedValue,
-        );
-        const equity = calculateEquity(
-          propertyData.estimatedValue,
-          mortgageBalance,
-          taxLien.tax_amount_due,
-        );
-
-        // Get county name for scoring
-        const { data: county } = await supabaseAdmin
-          .from("counties")
-          .select("name")
-          .eq("id", taxLien.county_id)
+      // If upsert fails due to missing constraint, fall back to manual check/update
+      if (upsertError && upsertError.code === '42P10') {
+        console.log(`Unique constraint not found, using manual update/insert approach`);
+        
+        // Check if property record already exists
+        const { data: existingProperty } = await supabaseAdmin
+          .from("properties")
+          .select("id")
+          .eq("tax_lien_id", taxLienId)
           .single();
 
-        const investmentScore = calculateInvestmentScore(
-          ltv,
-          equity,
-          taxLien.tax_amount_due,
-          propertyData.estimatedValue,
-          propertyData.propertyType || "Unknown",
-          county?.name || "Unknown",
+        if (existingProperty) {
+          // Update existing record
+          const { error: updateError } = await supabaseAdmin
+            .from("properties")
+            .update(propertyRecord)
+            .eq("tax_lien_id", taxLienId);
+          
+          if (updateError) {
+            console.error(`Error updating property:`, updateError);
+            throw updateError;
+          }
+          console.log(`✅ Property data updated successfully for tax_lien_id: ${taxLienId}`);
+        } else {
+          // Insert new record
+          const { error: insertError } = await supabaseAdmin
+            .from("properties")
+            .insert(propertyRecord);
+          
+          if (insertError) {
+            console.error(`Error inserting property:`, insertError);
+            throw insertError;
+          }
+          console.log(`✅ Property data inserted successfully for tax_lien_id: ${taxLienId}`);
+        }
+      } else if (upsertError) {
+        // Other error occurred
+        console.error(`Error saving property to database:`, upsertError);
+        throw upsertError;
+      } else {
+        // Upsert succeeded
+        console.log(`✅ Property data saved successfully for tax_lien_id: ${taxLienId}`);
+      }
+
+      let valuationData: any = null;
+
+      try {
+        console.log(`Trying endpoint: ${urls.valuation.url}`);
+        console.log(`Property data keys:`, Object.keys(propertyData));
+        console.log(`Property data.id:`, propertyData.id);
+        console.log(`Property data.address:`, propertyData.address);
+
+        const response = await axios.post(
+          urls.valuation.url,
+          { id: propertyData.id },
+          {
+            headers: {
+              "x-api-key": this.apiKey,
+            },
+          }
         );
 
-        // Save investment score
-        await supabaseAdmin.from("investment_scores").upsert(
-          {
-            tax_lien_id: taxLienId,
-            ltv,
-            equity_estimate: equity,
-            investment_score: investmentScore.score,
-            score_breakdown: investmentScore.breakdown,
-            calculated_at: new Date().toISOString(),
-          },
+        console.log(`✅ Success with ${urls.valuation.url}:`, response.status, response.data.data);
+
+        if (response.data && response.data.data) {
+          valuationData = response.data.data;
+        }
+
+        if (!valuationData) {
+          throw new Error("Failed to get valuation data");
+        }
+
+        // Update properties table with valuation data
+        // API returns: avm, avmMin, avmMax, confidence
+        const updateData: any = {
+          tax_lien_id: taxLienId,
+          enriched_at: new Date().toISOString(),
+        };
+
+        // Update estimated_value with AVM (Automated Valuation Model) value
+        if (valuationData.avm) {
+          updateData.estimated_value = parseFloat(valuationData.avm);
+        }
+
+        // Save AVM range and confidence
+        if (valuationData.avmMin) {
+          updateData.avm_min = parseFloat(valuationData.avmMin);
+        }
+        if (valuationData.avmMax) {
+          updateData.avm_max = parseFloat(valuationData.avmMax);
+        }
+        if (valuationData.confidence) {
+          updateData.confidence = parseInt(valuationData.confidence, 10);
+        }
+
+        // Save valuation data to properties table
+        await supabaseAdmin.from("properties").upsert(
+          updateData,
           {
             onConflict: "tax_lien_id",
           },
         );
 
         console.log(
-          `Property enriched and scored: ${address} (Score: ${investmentScore.score})`,
+          `✅ Valuation data saved for property: ${parcelId} (AVM: $${valuationData.avm}, Confidence: ${valuationData.confidence}%)`,
         );
+        
+      } catch (error: any) {
+        console.log(
+          `⚠️ Failed to get valuation data:`,
+          error.response?.status || error.message,
+        );
+        if (error.response?.data) {
+          console.log(`Valuation API error details:`, JSON.stringify(error.response.data, null, 2));
+        }
+        // Don't throw - valuation is optional, continue with property data we already have
       }
+
+      // Calculate investment metrics (LTV, equity, investment score)
+      try {
+        // Get tax lien data for investment calculations
+        const { data: taxLien } = await supabaseAdmin
+          .from("tax_liens")
+          .select("tax_amount_due, county_id")
+          .eq("id", taxLienId)
+          .single();
+
+        // Get the saved property data to use for calculations
+        const { data: savedProperty } = await supabaseAdmin
+          .from("properties")
+          .select("estimated_value, mortgage_balance, property_type")
+          .eq("tax_lien_id", taxLienId)
+          .single();
+
+        if (taxLien && savedProperty && savedProperty.estimated_value && savedProperty.estimated_value > 0) {
+          // Calculate investment metrics
+          const mortgageBalance = savedProperty.mortgage_balance || 0;
+          const estimatedValue = savedProperty.estimated_value;
+          const taxAmount = taxLien.tax_amount_due || 0;
+
+          const ltv = calculateLTV(
+            mortgageBalance,
+            taxAmount,
+            estimatedValue,
+          );
+          
+          const equity = calculateEquity(
+            estimatedValue,
+            mortgageBalance,
+            taxAmount,
+          );
+
+          // Get county name for scoring
+          const { data: county } = await supabaseAdmin
+            .from("counties")
+            .select("name")
+            .eq("id", taxLien.county_id)
+            .single();
+
+          const investmentScore = calculateInvestmentScore(
+            ltv,
+            equity,
+            taxAmount,
+            estimatedValue,
+            savedProperty.property_type || "Unknown",
+            county?.name || "Unknown",
+          );
+
+          // Save investment score
+          const scoreData = {
+            tax_lien_id: taxLienId,
+            ltv,
+            equity_estimate: equity,
+            investment_score: investmentScore.score,
+            score_breakdown: investmentScore.breakdown,
+            calculated_at: new Date().toISOString(),
+          };
+
+          // Try upsert first (if unique constraint exists)
+          let { error: scoreError } = await supabaseAdmin.from("investment_scores").upsert(
+            scoreData,
+            {
+              onConflict: "tax_lien_id",
+            },
+          );
+
+          // If upsert fails due to missing constraint, fall back to manual check/update
+          if (scoreError && scoreError.code === '42P10') {
+            console.log(`Unique constraint not found on investment_scores, using manual update/insert`);
+            
+            // Check if investment score already exists
+            const { data: existingScore } = await supabaseAdmin
+              .from("investment_scores")
+              .select("id")
+              .eq("tax_lien_id", taxLienId)
+              .single();
+
+            if (existingScore) {
+              // Update existing record
+              const { error: updateError } = await supabaseAdmin
+                .from("investment_scores")
+                .update(scoreData)
+                .eq("tax_lien_id", taxLienId);
+              
+              scoreError = updateError;
+            } else {
+              // Insert new record
+              const { error: insertError } = await supabaseAdmin
+                .from("investment_scores")
+                .insert(scoreData);
+              
+              scoreError = insertError;
+            }
+          }
+
+          if (scoreError) {
+            console.error(`Error saving investment score:`, scoreError);
+          } else {
+            console.log(
+              `✅ Investment score calculated: LTV=${ltv.toFixed(2)}%, Equity=$${equity.toFixed(2)}, Score=${investmentScore.score}`,
+            );
+          }
+        } else {
+          console.log(`⚠️ Skipping investment score calculation - missing required data (taxLien: ${!!taxLien}, property: ${!!savedProperty}, estimatedValue: ${savedProperty?.estimated_value})`);
+        }
+      } catch (error: any) {
+        console.error(`Error calculating investment score:`, error.message);
+        // Don't throw - investment score calculation is optional
+      }
+
     } catch (error: any) {
-      console.error(`Error enriching property ${address}:`, error.message);
+      console.error(`Error enriching property ${parcelId}:`, error.message);
 
       // Log detailed error information
       if (error.response) {
@@ -242,7 +447,7 @@ export class RealEstateService {
 
       // Don't throw - continue with next property
       console.log(
-        `⚠️ Property ${address} enrichment failed, continuing with next property`,
+        `⚠️ Property ${parcelId} enrichment failed, continuing with next property`,
       );
     }
   }
@@ -282,9 +487,7 @@ export class RealEstateService {
           batch.map((lien) =>
             this.enrichProperty(
               lien.id,
-              lien.property_address,
-              lien.city || undefined,
-              lien.zip || undefined,
+              lien.property_address || lien.parcel_id || "",
             ),
           ),
         );
@@ -311,15 +514,12 @@ export class RealEstateService {
         .select(
           `
           id,
-          property_address,
-          city,
-          zip,
+          parcel_id,
           properties(id)
         `,
         )
         .eq("county_id", countyId)
-        .is("properties.id", null)
-        .limit(50);
+        .is("properties.id", null);
 
       if (!taxLiens || taxLiens.length === 0) {
         console.log("No properties to enrich for this county");
@@ -331,12 +531,10 @@ export class RealEstateService {
       );
 
       await Promise.all(
-        taxLiens.map((lien) =>
+        taxLiens.map((lien) => 
           this.enrichProperty(
             lien.id,
-            lien.property_address,
-            lien.city || undefined,
-            lien.zip || undefined,
+            lien.parcel_id,
           ),
         ),
       );
