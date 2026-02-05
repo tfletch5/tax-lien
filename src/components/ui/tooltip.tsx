@@ -43,29 +43,74 @@ export function Tooltip({
           const scrollX = window.scrollX || window.pageXOffset;
           const scrollY = window.scrollY || window.pageYOffset;
           
-          let top = 0;
-          let left = rect.left + rect.width / 2;
+          const offset = 8; // Consistent offset for all positions
+          let top: number | undefined;
+          let bottom: number | undefined;
+          let left: number;
+          let right: number | undefined;
           
-          if (position === "bottom") {
-            top = rect.bottom + scrollY + 8;
-          } else {
-            top = rect.top + scrollY - 8;
+          // Calculate horizontal position (centered for top/bottom, aligned for left/right)
+          if (position === "top" || position === "bottom") {
+            left = rect.left + rect.width / 2;
+            right = undefined;
+          } else if (position === "left") {
+            left = rect.left + scrollX;
+            right = undefined;
+          } else { // position === "right"
+            left = rect.right + scrollX + offset;
+            right = undefined;
           }
           
-          setTooltipStyle({
+          // Calculate vertical position based on tooltip position
+          if (position === "top") {
+            // Position above the trigger element
+            top = rect.top + scrollY - offset;
+            bottom = undefined;
+          } else if (position === "bottom") {
+            // Position below the trigger element using bottom property
+            bottom = window.innerHeight - (rect.bottom + scrollY) + offset;
+            top = undefined;
+          } else if (position === "left") {
+            // Position to the left, vertically centered
+            top = rect.top + scrollY + rect.height / 2;
+            bottom = undefined;
+          } else { // position === "right"
+            // Position to the right, vertically centered
+            top = rect.top + scrollY + rect.height / 2;
+            bottom = undefined;
+          }
+          
+          // Build style object with only defined values
+          const style: React.CSSProperties = {
             position: 'fixed',
-            top: position === "top" ? `${top}px` : undefined,
-            bottom: position === "bottom" ? `${window.innerHeight - (rect.bottom + scrollY) + 8}px` : undefined,
             left: `${left}px`,
-            transform: 'translateX(-50%)',
+            zIndex: 9999,
             width: '300px',
             maxWidth: '90vw',
             minWidth: '300px',
-            zIndex: 9999,
             whiteSpace: 'normal',
             wordSpacing: 'normal',
             lineHeight: '1.5'
-          });
+          };
+          
+          if (top !== undefined) {
+            style.top = `${top}px`;
+          }
+          if (bottom !== undefined) {
+            style.bottom = `${bottom}px`;
+          }
+          if (right !== undefined) {
+            style.right = `${right}px`;
+          }
+          
+          // Add transform based on position
+          if (position === "top" || position === "bottom") {
+            style.transform = 'translateX(-50%)';
+          } else if (position === "left" || position === "right") {
+            style.transform = 'translateY(-50%)';
+          }
+          
+          setTooltipStyle(style);
         }
       };
       

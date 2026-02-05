@@ -1,29 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
-import { DeKalbScraper } from "@/lib/scrapers/DeKalbScraper";
+import { GwinnettScraper } from "@/lib/scrapers/GwinnettScraper";
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("Starting DeKalb County tax lien scraping...");
+    console.log("Starting Gwinnett County tax lien scraping...");
 
     // Check if enrichment should be enabled (default: true)
-    const body = await request.json().catch(() => ({}));
-    const enableEnrichment = body.enableEnrichment !== false; // Default to true
-    
-    const scraper = new DeKalbScraper(1, "DeKalb", enableEnrichment);
+    let enableEnrichment = true;
+    try {
+      const body = await request.json();
+      enableEnrichment = body.enableEnrichment !== false; // Default to true
+    } catch {
+      // No body provided, use default
+      enableEnrichment = true;
+    }
+
+    const scraper = new GwinnettScraper(2, "Gwinnett", enableEnrichment);
     const liens = await scraper.scrape();
 
     console.log(
-      `Successfully scraped ${liens.length} tax liens from DeKalb County`,
+      `Successfully scraped ${liens.length} tax liens from Gwinnett County`,
     );
 
     return NextResponse.json({
       success: true,
-      message: `DeKalb County scraping completed`,
+      message: `Gwinnett County scraping completed`,
       count: liens.length,
       liens: liens.slice(0, 5), // Return first 5 for preview
     });
   } catch (error) {
-    console.error("DeKalb scraping error:", error);
+    console.error("Gwinnett scraping error:", error);
     return NextResponse.json(
       {
         success: false,
@@ -54,7 +60,7 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * limit;
 
     console.log(
-      `GET: Fetching DeKalb tax liens... page ${page}, limit ${limit}`,
+      `GET: Fetching Gwinnett tax liens... page ${page}, limit ${limit}`,
     );
 
     // Build base query with search filters and joins
@@ -69,7 +75,7 @@ export async function GET(request: NextRequest) {
         investment_score:investment_scores(*)
       `,
       )
-      .eq("county_id", 1); // DeKalb County ID
+      .eq("county_id", 2); // Gwinnett County ID
 
     // Apply search filters
     if (address) {
@@ -99,13 +105,13 @@ export async function GET(request: NextRequest) {
     const { count: totalCount } = await supabaseAdmin
       .from("tax_liens")
       .select("*", { count: "exact", head: true })
-      .eq("county_id", 1);
+      .eq("county_id", 2);
 
     // Apply the same filters to count query
     let countQuery = supabaseAdmin
       .from("tax_liens")
       .select("*", { count: "exact", head: true })
-      .eq("county_id", 1);
+      .eq("county_id", 2);
 
     if (address) {
       countQuery = countQuery.ilike("property_address", `%${address}%`);
@@ -136,7 +142,7 @@ export async function GET(request: NextRequest) {
     const { data: allTaxLiens, error: taxValueError } = await supabaseAdmin
       .from("tax_liens")
       .select("tax_amount_due")
-      .eq("county_id", 1);
+      .eq("county_id", 2);
 
     const totalTaxValue =
       allTaxLiens?.reduce((sum, lien) => sum + (lien.tax_amount_due || 0), 0) ||
@@ -146,7 +152,7 @@ export async function GET(request: NextRequest) {
     let filteredTaxValueQuery = supabaseAdmin
       .from("tax_liens")
       .select("tax_amount_due")
-      .eq("county_id", 1);
+      .eq("county_id", 2);
 
     if (address) {
       filteredTaxValueQuery = filteredTaxValueQuery.ilike(
@@ -250,7 +256,7 @@ export async function GET(request: NextRequest) {
         console.error("Error fetching all records for confidence sort:", allError);
         if (allError) {
           return NextResponse.json({
-            county: "DeKalb",
+            county: "Gwinnett",
             taxLiens: [],
             recentLogs: [],
             totalProperties: 0,
@@ -273,7 +279,7 @@ export async function GET(request: NextRequest) {
       if (queryError) {
         console.error("Query failed:", queryError);
         return NextResponse.json({
-          county: "DeKalb",
+          county: "Gwinnett",
           taxLiens: [],
           recentLogs: [],
           totalProperties: 0,
@@ -298,28 +304,13 @@ export async function GET(request: NextRequest) {
         }
         return lien;
       });
-      
-      // Debug: Check if investment_score data is present
-      if (taxLiens.length > 0) {
-        const sampleWithScore = taxLiens.find((l: any) => l.investment_score);
-        const sampleWithoutScore = taxLiens.find((l: any) => !l.investment_score);
-        if (sampleWithScore) {
-          console.log('Sample with investment_score:', {
-            ltv: sampleWithScore.investment_score?.ltv,
-            investment_score: sampleWithScore.investment_score?.investment_score,
-            hasLTV: sampleWithScore.investment_score?.ltv !== undefined && sampleWithScore.investment_score?.ltv !== null
-          });
-        }
-        console.log(`Records with investment_score: ${taxLiens.filter((l: any) => l.investment_score).length}/${taxLiens.length}`);
-        console.log(`Records with LTV: ${taxLiens.filter((l: any) => l.investment_score?.ltv !== undefined && l.investment_score?.ltv !== null).length}/${taxLiens.length}`);
-      }
     }
 
-    // Get scrape logs for DeKalb
+    // Get scrape logs for Gwinnett
     const { data: scrapeLogs } = await supabaseAdmin
       .from("scrape_logs")
       .select("*")
-      .eq("county_id", 1)
+      .eq("county_id", 2)
       .order("started_at", { ascending: false })
       .limit(5);
 
@@ -335,11 +326,11 @@ export async function GET(request: NextRequest) {
     }
 
     console.log(
-      `GET: Returning ${taxLiens?.length || 0} tax liens for DeKalb (page ${page} of ${finalTotalPages})`,
+      `GET: Returning ${taxLiens?.length || 0} tax liens for Gwinnett (page ${page} of ${finalTotalPages})`,
     );
 
     return NextResponse.json({
-      county: "DeKalb",
+      county: "Gwinnett",
       taxLiens: taxLiens || [],
       recentLogs: scrapeLogs || [],
       totalProperties: totalCount || 0,
@@ -352,7 +343,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("DeKalb status API error:", error);
+    console.error("Gwinnett status API error:", error);
     return NextResponse.json(
       {
         success: false,

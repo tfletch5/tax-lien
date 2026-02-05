@@ -1,11 +1,31 @@
 import * as cheerio from "cheerio";
 import axios from "axios";
 import { BaseScraper, ScrapedTaxLien } from "./BaseScraper";
+import { RealEstateService } from "@/lib/RealEstateService";
+import { parsePdf } from "@/lib/utils/pdfParse";
 
 export class CobbScraper extends BaseScraper {
+  private enableEnrichment: boolean;
+  private realEstateService: RealEstateService | null = null;
+
+  constructor(countyId: number, countyName: string, enableEnrichment: boolean = true) {
+    super(countyId, countyName);
+    this.enableEnrichment = enableEnrichment;
+    if (enableEnrichment) {
+      try {
+        this.realEstateService = new RealEstateService();
+      } catch (error) {
+        console.warn("RealEstateService initialization failed, enrichment disabled:", error);
+        this.enableEnrichment = false;
+      }
+    }
+  }
   async scrape(): Promise<ScrapedTaxLien[]> {
     try {
       console.log("Starting Cobb County tax lien scraping...");
+      if (this.enableEnrichment) {
+        console.log("⚠️ Enrichment during scraping is ENABLED - only properties with assessedImprovementValue > 0 will be saved");
+      }
 
       const url = "https://www.cobbtax.gov/property/tax_sale/index.php";
 
@@ -113,20 +133,111 @@ export class CobbScraper extends BaseScraper {
       // If still no data, generate sample data for demonstration
       if (liens.length === 0) {
         console.log("No tax lien data found, generating sample data...");
-        liens.push(...this.generateMockCobbData());
+        // liens.push(...this.generateMockCobbData());
       }
 
-      console.log(`Found ${liens.length} tax liens in Cobb County`);
+      console.log(`Found ${liens.length} total tax liens in Cobb County`);
+
+      // Enrich and filter liens if enrichment is enabled
+      let validLiens: ScrapedTaxLien[] = [];
+      if (this.enableEnrichment && this.realEstateService) {
+        console.log(`Enriching ${liens.length} liens to validate assessedImprovementValue...`);
+        validLiens = await this.enrichAndFilterLiens(liens);
+        console.log(`After enrichment filtering: ${validLiens.length} valid liens (${liens.length - validLiens.length} skipped)`);
+      } else {
+        validLiens = liens;
+      }
 
       // Save to database
-      await this.saveToDatabase(liens);
+      await this.saveToDatabase(validLiens);
 
-      return liens;
+      // After saving, enrich the saved liens to populate properties and investment scores
+      if (this.enableEnrichment && this.realEstateService && validLiens.length > 0) {
+        console.log(`Enriching ${validLiens.length} saved liens to populate properties and investment scores...`);
+        await this.enrichSavedLiens(validLiens);
+      }
+
+      return validLiens;
     } catch (error) {
       console.error("Error scraping Cobb County:", error);
       throw new Error(
         `Cobb scraping failed: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
+    }
+  }
+
+  /**
+   * Enrich each lien and filter out those with assessedImprovementValue = 0
+   * Includes rate limiting to avoid API throttling
+   */
+  private async enrichAndFilterLiens(liens: ScrapedTaxLien[]): Promise<ScrapedTaxLien[]> {
+    if (!this.realEstateService) {
+      return liens;
+    }
+
+    const validLiens: ScrapedTaxLien[] = [];
+    const rateLimitDelay = 200; // 200ms delay between API calls
+
+    for (let i = 0; i < liens.length; i++) {
+      const lien = liens[i];
+      
+      try {
+        // Rate limiting
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, rateLimitDelay));
+        }
+
+        const address = lien.property_address;
+        const result = await this.realEstateService.enrichPropertyByParcel(
+          lien.parcel_id,
+          address
+        );
+
+        if (result && result.isValid) {
+          validLiens.push(lien);
+        } else {
+          console.log(`Skipping lien ${lien.parcel_id}: assessedImprovementValue = 0`);
+        }
+      } catch (error) {
+        console.error(`Error enriching lien ${lien.parcel_id}:`, error);
+        // Skip liens that fail enrichment
+      }
+    }
+
+    return validLiens;
+  }
+
+  /**
+   * Enrich saved liens to populate properties and investment_scores tables
+   */
+  private async enrichSavedLiens(liens: ScrapedTaxLien[]): Promise<void> {
+    if (!this.realEstateService) {
+      return;
+    }
+
+    // Fetch the saved tax liens to get their IDs
+    const { supabaseAdmin } = await import("@/lib/supabase");
+    const parcelIds = liens.map(l => l.parcel_id);
+
+    const { data: savedLiens, error } = await supabaseAdmin
+      .from("tax_liens")
+      .select("id, parcel_id")
+      .eq("county_id", this.countyId)
+      .in("parcel_id", parcelIds);
+
+    if (error || !savedLiens) {
+      console.error("Error fetching saved liens for enrichment:", error);
+      return;
+    }
+
+    console.log(`Enriching ${savedLiens.length} saved liens...`);
+
+    for (const savedLien of savedLiens) {
+      try {
+        await this.realEstateService.enrichProperty(savedLien.id, savedLien.parcel_id);
+      } catch (error) {
+        console.error(`Error enriching saved lien ${savedLien.parcel_id}:`, error);
+      }
     }
   }
 

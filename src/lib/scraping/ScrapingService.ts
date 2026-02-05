@@ -7,11 +7,11 @@ import { supabaseAdmin } from "@/lib/supabase";
 
 export class ScrapingService {
   private scrapers = [
-    new DeKalbScraper(1, "DeKalb"),
-    new GwinnettScraper(2, "Gwinnett"),
-    new CobbScraper(3, "Cobb"),
-    new FultonScraper(4, "Fulton"),
-    new ClaytonScraper(5, "Clayton"),
+    new DeKalbScraper(1, "DeKalb", true), // Enable enrichment for DeKalb
+    new GwinnettScraper(2, "Gwinnett", true), // Enable enrichment for Gwinnett
+    new CobbScraper(3, "Cobb", true), // Enable enrichment for Cobb
+    new FultonScraper(4, "Fulton", true), // Enable enrichment for Fulton
+    new ClaytonScraper(5, "Clayton", true), // Enable enrichment for Clayton
   ];
 
   async scrapeAllCounties(): Promise<void> {

@@ -31,6 +31,126 @@ export class RealEstateService {
     }
   }
 
+  /**
+   * Enrich property by parcel ID and return property data without saving to database.
+   * Used during scraping to validate properties before saving.
+   * @param parcelId The parcel ID (APN)
+   * @param address Optional address for fallback search
+   * @returns Property data object if valid (assessedImprovementValue > 0), null otherwise
+   */
+  async enrichPropertyByParcel(
+    parcelId: string,
+    address?: string
+  ): Promise<{ propertyData: any; isValid: boolean } | null> {
+    try {
+      console.log(`Enriching property by parcel: ${parcelId}`);
+
+      const urls = {
+        "search": {
+          url: `${this.baseUrl}/PropertySearch`,
+          params: { apn: parcelId, state: "GA" }
+        },
+      };
+      
+      let propertyData: any = null;
+      let lastError: any = null;
+
+      try {
+        console.log(`Trying endpoint: ${urls.search.url} with APN: ${parcelId}`);
+
+        const response = await axios.post(
+          urls.search.url,
+          urls.search.params,
+          {
+            headers: {
+              "x-api-key": this.apiKey,
+            },
+          }
+        );
+
+        console.log(`✅ Success with ${urls.search.url}:`, response.status);
+
+        // Handle the RealEstateAPI response format
+        if (response.data && response.data.data) {
+          // Check if data is an array (PropertySearch might return multiple results)
+          if (Array.isArray(response.data.data)) {
+            // Use the first property from the array
+            propertyData = response.data.data[0];
+          } else {
+            propertyData = response.data.data;
+          }
+        }
+
+        if (!propertyData) {
+          throw new Error("Failed to get property data");
+        }
+      } catch (error: any) {
+        console.log(
+          `❌ Failed with ${urls.search.url}:`,
+          error.response?.status || error.message,
+        );
+        lastError = error;
+
+        // If we have an address, try searching by address as fallback
+        if (address && error.response?.status === 404) {
+          try {
+            console.log(`Trying fallback search by address: ${address}`);
+            const addressResponse = await axios.post(
+              urls.search.url,
+              { address: address, state: "GA" },
+              {
+                headers: {
+                  "x-api-key": this.apiKey,
+                },
+              }
+            );
+
+            if (addressResponse.data && addressResponse.data.data) {
+              if (Array.isArray(addressResponse.data.data)) {
+                propertyData = addressResponse.data.data[0];
+              } else {
+                propertyData = addressResponse.data.data;
+              }
+            }
+          } catch (addressError) {
+            console.log(`Fallback address search also failed`);
+          }
+        }
+
+        if (!propertyData && error.response?.status !== 404) {
+          // For non-404 errors, don't continue
+          throw error;
+        }
+      }
+
+      if (!propertyData) {
+        console.log(`⚠️ No property data found for parcel ${parcelId}`);
+        return null;
+      }
+
+      // Check if assessedImprovementValue is 0 - if so, property is not valid
+      // Use nullish coalescing (??) instead of || to properly handle 0 values
+      // If assessedImprovementValue is 0, we want to detect it, not skip to the next field
+      const assessedImprovementValue = 
+        propertyData.assessedImprovementValue ?? 
+        propertyData.assessed_improvement_value ?? 
+        0;
+      
+      const isValid = assessedImprovementValue !== 0 && assessedImprovementValue !== "0";
+
+      if (!isValid) {
+        console.log(`⚠️ Property ${parcelId} has assessedImprovementValue = 0, skipping`);
+        return { propertyData, isValid: false };
+      }
+
+      console.log(`✅ Property ${parcelId} is valid (assessedImprovementValue > 0)`);
+      return { propertyData, isValid: true };
+    } catch (error) {
+      console.error(`Error enriching property by parcel ${parcelId}:`, error);
+      return null;
+    }
+  }
+
   async enrichProperty(
     taxLienId: string,
     parcelId: string
@@ -99,6 +219,8 @@ export class RealEstateService {
       if (!propertyData) {
         throw lastError || new Error("All API endpoints failed");
       }
+
+      console.log(`Property data:`, JSON.stringify(propertyData, null, 2));
 
       // Skip if assessedImprovementValue is 0 (as per comment)
       if (propertyData.assessedImprovementValue === 0 || propertyData.assessedImprovementValue === "0") {
@@ -181,6 +303,39 @@ export class RealEstateService {
         propertyData.mortgage_balance ? parseFloat(propertyData.mortgage_balance) :
         0;
 
+      // Update tax_liens table with city, state, and zip from property data
+      // Try multiple possible field names from the API response
+      const city = propertyData.address.city || propertyData.cityName || null;
+      const state = propertyData.address.state || propertyData.stateCode || "GA"; // Default to GA if not found
+      const zip = propertyData.address.zip || propertyData.zipCode || propertyData.postalCode || null;
+      
+      if (city || state || zip) {
+        const taxLienUpdate: any = {};
+        
+        if (city) {
+          taxLienUpdate.city = city;
+        }
+        if (state) {
+          taxLienUpdate.state = state;
+        }
+        if (zip) {
+          taxLienUpdate.zip = zip;
+        }
+        
+        // Update tax_liens table
+        const { error: taxLienUpdateError } = await supabaseAdmin
+          .from("tax_liens")
+          .update(taxLienUpdate)
+          .eq("id", taxLienId);
+        
+        if (taxLienUpdateError) {
+          console.error(`Error updating tax_liens with address data:`, taxLienUpdateError);
+          // Don't throw - this is not critical, continue with property enrichment
+        } else {
+          console.log(`✅ Updated tax_liens with city/state/zip:`, taxLienUpdate);
+        }
+      }
+
       console.log(`Saving property record:`, JSON.stringify(propertyRecord, null, 2));
 
       // Try upsert first (if unique constraint exists)
@@ -252,8 +407,6 @@ export class RealEstateService {
             },
           }
         );
-
-        console.log(`✅ Success with ${urls.valuation.url}:`, response.status, response.data.data);
 
         if (response.data && response.data.data) {
           valuationData = response.data.data;

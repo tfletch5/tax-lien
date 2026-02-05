@@ -1,11 +1,30 @@
 import * as cheerio from "cheerio";
 import axios from "axios";
 import { BaseScraper, ScrapedTaxLien } from "./BaseScraper";
+import { RealEstateService } from "@/lib/RealEstateService";
 
 export class DeKalbScraper extends BaseScraper {
+  private enableEnrichment: boolean;
+  private realEstateService: RealEstateService | null = null;
+
+  constructor(countyId: number, countyName: string, enableEnrichment: boolean = true) {
+    super(countyId, countyName);
+    this.enableEnrichment = enableEnrichment;
+    if (enableEnrichment) {
+      try {
+        this.realEstateService = new RealEstateService();
+      } catch (error) {
+        console.warn("RealEstateService initialization failed, enrichment disabled:", error);
+        this.enableEnrichment = false;
+      }
+    }
+  }
   async scrape(): Promise<ScrapedTaxLien[]> {
     try {
       console.log("Starting DeKalb County tax lien scraping...");
+      if (this.enableEnrichment) {
+        console.log("⚠️ Enrichment during scraping is ENABLED - only properties with assessedImprovementValue > 0 will be saved");
+      }
 
       // DeKalb uses an HTML form-based search
       const url =
@@ -120,15 +139,122 @@ export class DeKalbScraper extends BaseScraper {
         });
       }
 
-      // Save to database
-      await this.saveToDatabase(liens);
+      // Enrich and filter liens if enrichment is enabled
+      let validLiens = liens;
+      if (this.enableEnrichment && this.realEstateService && liens.length > 0) {
+        console.log(`Enriching ${liens.length} liens to validate assessedImprovementValue...`);
+        validLiens = await this.enrichAndFilterLiens(liens);
+        console.log(`After enrichment filtering: ${validLiens.length} valid liens (${liens.length - validLiens.length} skipped)`);
+      }
 
-      return liens;
+      // Save only valid liens to database
+      if (validLiens.length > 0) {
+        console.log(`Attempting to save ${validLiens.length} tax liens to database...`);
+        await this.saveToDatabase(validLiens);
+        console.log(`Database save complete: ${validLiens.length} successful, 0 failed`);
+      } else {
+        console.log("No valid liens to save after enrichment filtering");
+      }
+
+      // After saving, enrich the saved liens to populate properties and investment scores
+      if (this.enableEnrichment && this.realEstateService && validLiens.length > 0) {
+        console.log(`Enriching ${validLiens.length} saved liens to populate properties and investment scores...`);
+        await this.enrichSavedLiens(validLiens);
+      }
+
+      return validLiens;
     } catch (error) {
       console.error("Error scraping DeKalb County:", error);
       throw new Error(
         `DeKalb scraping failed: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
     }
+  }
+
+  /**
+   * Enrich liens during scraping to filter out properties with assessedImprovementValue = 0
+   * This is called before saving to database
+   */
+  private async enrichAndFilterLiens(liens: ScrapedTaxLien[]): Promise<ScrapedTaxLien[]> {
+    if (!this.realEstateService) {
+      return liens;
+    }
+
+    const validLiens: ScrapedTaxLien[] = [];
+    const rateLimitDelay = 200; // 200ms delay between API calls
+
+    console.log(`Enriching ${liens.length} liens to validate assessedImprovementValue...`);
+
+    for (let i = 0; i < liens.length; i++) {
+      const lien = liens[i];
+      try {
+        // Rate limiting
+        if (i > 0 && i % 10 === 0) {
+          console.log(`Enrichment progress: ${i}/${liens.length}...`);
+        }
+        if (i > 0) {
+          await new Promise((resolve) => setTimeout(resolve, rateLimitDelay));
+        }
+
+        const address = lien.property_address;
+        const result = await this.realEstateService.enrichPropertyByParcel(
+          lien.parcel_id,
+          address
+        );
+
+        if (result && result.isValid) {
+          validLiens.push(lien);
+        } else {
+          console.log(`Skipping lien ${lien.parcel_id}: assessedImprovementValue = 0`);
+        }
+      } catch (error) {
+        console.error(`Error enriching lien ${lien.parcel_id}:`, error);
+        // Skip liens that fail enrichment
+      }
+    }
+
+    return validLiens;
+  }
+
+  /**
+   * Enrich saved liens to populate properties and investment_scores tables
+   */
+  private async enrichSavedLiens(liens: ScrapedTaxLien[]): Promise<void> {
+    if (!this.realEstateService) {
+      return;
+    }
+
+    // Fetch the saved tax liens to get their IDs
+    const { supabaseAdmin } = await import("@/lib/supabase");
+    const parcelIds = liens.map((l) => l.parcel_id);
+
+    const { data: savedLiens, error } = await supabaseAdmin
+      .from("tax_liens")
+      .select("id, parcel_id")
+      .eq("county_id", this.countyId)
+      .in("parcel_id", parcelIds);
+
+    if (error || !savedLiens) {
+      console.error("Error fetching saved liens for enrichment:", error);
+      return;
+    }
+
+    console.log(`Enriching ${savedLiens.length} saved liens...`);
+
+    for (const savedLien of savedLiens) {
+      try {
+        console.log(`Enriching saved lien ${savedLien.parcel_id} (ID: ${savedLien.id})...`);
+
+        // Enrich property - this will save to properties table and calculate investment scores
+        await this.realEstateService.enrichProperty(savedLien.id, savedLien.parcel_id);
+
+        console.log(`✅ Successfully enriched lien ${savedLien.parcel_id}`);
+      } catch (error) {
+        console.error(`Error enriching saved lien ${savedLien.parcel_id}:`, error);
+        // Continue with next lien even if this one fails
+      }
+    }
+
+    console.log(`✅ Completed enrichment for ${liens.length} saved liens`);
   }
 }
