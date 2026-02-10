@@ -315,84 +315,13 @@ async function parsePdfWithPdfParse(buffer: Buffer): Promise<{ text: string }> {
 
 async function parsePdfWithOCR(buffer: Buffer): Promise<{ text: string }> {
   // OCR fallback for image-based (scanned) PDFs
-  // NOTE: Requires --webpack flag for dev server: npm run dev -- --webpack
-  // Turbopack cannot resolve native modules (canvas, sharp) at build time
+  // NOTE: This requires canvas and sharp dependencies which are not available in serverless environments
   console.log("🔄 Attempting OCR extraction for image-based PDF...");
   console.log(
-    "💡 If this fails, ensure you are running: npm run dev -- --webpack",
+    "💡 OCR requires canvas and sharp dependencies - not available in serverless environments",
   );
 
-  // Use require() for all modules (pdfjs-dist v3 has CommonJS builds)
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { createCanvas } = require("canvas");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const sharp = require("sharp");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { createWorker } = require("tesseract.js");
-
-  // Set the worker source for pdfjs-dist
-  pdfjsLib.GlobalWorkerOptions.workerSrc = require("pdfjs-dist/build/pdf.worker.js");
-
-  // Load the PDF document
-  const uint8Array = new Uint8Array(buffer);
-  const loadingTask = pdfjsLib.getDocument({ data: uint8Array });
-  const pdfDoc = await loadingTask.promise;
-  const numPages = pdfDoc.numPages;
-  console.log(`📄 PDF has ${numPages} page(s), starting OCR...`);
-
-  // Create tesseract worker
-  const worker = await createWorker("eng");
-
-  let fullText = "";
-
-  try {
-    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-      console.log(`🔍 OCR processing page ${pageNum}/${numPages}...`);
-      const page = await pdfDoc.getPage(pageNum);
-
-      // Render at 2x scale for better OCR accuracy
-      const scale = 2.0;
-      const viewport = page.getViewport({ scale });
-
-      // Use canvas package for rendering
-      const canvas = createCanvas(
-        Math.floor(viewport.width),
-        Math.floor(viewport.height),
-      );
-      const context = canvas.getContext("2d");
-
-      await page.render({
-        canvasContext: context,
-        viewport,
-      }).promise;
-
-      // Convert canvas to PNG buffer
-      let imageBuffer = canvas.toBuffer("image/png");
-
-      // Preprocess with sharp for better OCR accuracy
-      imageBuffer = await sharp(imageBuffer)
-        .greyscale()
-        .normalize()
-        .sharpen()
-        .toBuffer();
-
-      // OCR the image
-      const {
-        data: { text },
-      } = await worker.recognize(imageBuffer);
-      fullText += text + "\n";
-      console.log(`✅ Page ${pageNum}: extracted ${text.length} characters`);
-    }
-  } finally {
-    await worker.terminate();
-  }
-
-  if (fullText.trim().length === 0) {
-    throw new Error("OCR extracted no text from the PDF");
-  }
-
-  console.log(`📝 OCR complete: extracted ${fullText.length} total characters`);
-  return { text: fullText };
+  throw new Error(
+    "OCR functionality requires canvas and sharp dependencies which are not available in serverless environments. Use manual input for Fulton County instead.",
+  );
 }
