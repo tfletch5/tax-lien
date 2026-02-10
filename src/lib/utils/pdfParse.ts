@@ -4,6 +4,10 @@
  */
 
 export async function parsePdf(buffer: Buffer): Promise<{ text: string }> {
+  // Check if we're in a serverless environment (Vercel) where OCR isn't available
+  const isServerless =
+    process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
+
   // First, try pdf2json (doesn't require browser APIs)
   try {
     return await parsePdfWithPdf2json(buffer);
@@ -13,21 +17,31 @@ export async function parsePdf(buffer: Buffer): Promise<{ text: string }> {
     try {
       return await parsePdfWithPdfParse(buffer);
     } catch (fallbackError: any) {
-      console.warn(
-        "pdf-parse also failed, trying OCR fallback:",
-        fallbackError.message,
-      );
-      // Final fallback: OCR for image-based PDFs
-      try {
-        return await parsePdfWithOCR(buffer);
-      } catch (ocrError: any) {
-        console.error("All PDF parsing methods failed:", {
-          pdf2json: error.message,
-          pdfParse: fallbackError.message,
-          ocr: ocrError.message,
-        });
+      console.warn("pdf-parse also failed:", fallbackError.message);
+
+      // Only try OCR if we're not in a serverless environment
+      if (!isServerless) {
+        console.warn(
+          "Trying OCR fallback (not available in serverless environments)...",
+        );
+        try {
+          return await parsePdfWithOCR(buffer);
+        } catch (ocrError: any) {
+          console.error("All PDF parsing methods failed:", {
+            pdf2json: error.message,
+            pdfParse: fallbackError.message,
+            ocr: ocrError.message,
+          });
+          throw new Error(
+            `PDF parsing failed: ${error.message}. OCR also failed.`,
+          );
+        }
+      } else {
+        console.warn(
+          "OCR fallback skipped - not available in serverless environments",
+        );
         throw new Error(
-          `PDF parsing failed: ${error.message}. All fallbacks failed.`,
+          `PDF parsing failed: ${error.message}. OCR not available in serverless environment.`,
         );
       }
     }
