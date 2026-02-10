@@ -37,6 +37,7 @@ export interface Property {
   property_type?: string
   mortgage_balance?: number
   enriched_at: string
+  confidence?: number
 }
 
 export interface InvestmentScore {

@@ -303,15 +303,20 @@ export class RealEstateService {
         propertyData.mortgage_balance ? parseFloat(propertyData.mortgage_balance) :
         0;
 
-      // Update tax_liens table with city, state, and zip from property data
+      // Update tax_liens table with address, city, state, and zip from property data
       // Try multiple possible field names from the API response
-      const city = propertyData.address.city || propertyData.cityName || null;
-      const state = propertyData.address.state || propertyData.stateCode || "GA"; // Default to GA if not found
-      const zip = propertyData.address.zip || propertyData.zipCode || propertyData.postalCode || null;
+      const propertyAddress = 
+        propertyData.address?.street || null;
+      const city = propertyData.address?.city || propertyData.cityName || propertyData.city || null;
+      const state = propertyData.address?.state || propertyData.stateCode || propertyData.state || "GA"; // Default to GA if not found
+      const zip = propertyData.address?.zip || propertyData.zipCode || propertyData.postalCode || propertyData.zip || null;
       
-      if (city || state || zip) {
+      if (propertyAddress || city || state || zip) {
         const taxLienUpdate: any = {};
         
+        if (propertyAddress) {
+          taxLienUpdate.property_address = propertyAddress;
+        }
         if (city) {
           taxLienUpdate.city = city;
         }
@@ -332,7 +337,7 @@ export class RealEstateService {
           console.error(`Error updating tax_liens with address data:`, taxLienUpdateError);
           // Don't throw - this is not critical, continue with property enrichment
         } else {
-          console.log(`✅ Updated tax_liens with city/state/zip:`, taxLienUpdate);
+          console.log(`✅ Updated tax_liens with address/city/state/zip:`, taxLienUpdate);
         }
       }
 

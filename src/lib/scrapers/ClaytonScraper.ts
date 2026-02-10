@@ -474,7 +474,56 @@ export class ClaytonScraper extends BaseScraper {
         
         // Extract Property Location
         if (columnOrder.propertyLocation >= 0 && parts.length > columnOrder.propertyLocation) {
-          address = parts[columnOrder.propertyLocation];
+          address = parts[columnOrder.propertyLocation].trim();
+          console.log(`Extracted address from column order: "${address}"`);
+        }
+        
+        // If column order didn't work or address is empty, try pattern matching
+        if (!address || address.length === 0) {
+          console.log(`Column order didn't find address or address is empty, trying pattern match...`);
+          // Pattern 1: Address with number (e.g., "0 CAMP DR", "1635 LOVEJOY RD")
+          let addressMatch = rowText.match(/(\d+\s+[A-Z][A-Z\s]+(?:DR|RD|ST|AVE|CT|LN|BLVD|PKWY|WAY|CIR|TRCE|VILLAGE|DRIVE|STREET|ROAD|AVENUE|BOULEVARD|PARKWAY|COURT|CIRCLE|BLVD))/i);
+          if (addressMatch) {
+            address = addressMatch[1].trim();
+            console.log(`Found address via pattern match (with number): "${address}"`);
+          } else {
+            // Pattern 2: Address without number (e.g., "ATTUCKS BLVD")
+            addressMatch = rowText.match(/([A-Z][A-Z\s]+(?:DR|RD|ST|AVE|CT|LN|BLVD|PKWY|WAY|CIR|TRCE|VILLAGE|DRIVE|STREET|ROAD|AVENUE|BOULEVARD|PARKWAY|COURT|CIRCLE))/i);
+            if (addressMatch) {
+              const potentialAddress = addressMatch[1].trim();
+              // Make sure it's not part of the owner name or parcel ID
+              // Owner names usually have patterns like "LLC", "INC", "JR", "SR", or are all caps with spaces
+              // Addresses should come after the parcel/owner section
+              const parcelOwnerEnd = rowText.indexOf(potentialAddress);
+              const parcelOwnerSection = rowText.substring(0, parcelOwnerEnd);
+              // Check if this looks like it's after the parcel/owner (should have "/" or parcel pattern before it)
+              if (parcelOwnerSection.match(/\d{5}[A-Z]\s+[A-Z]\d{3}/) || parcelOwnerSection.includes('/')) {
+                address = potentialAddress;
+                console.log(`Found address via pattern match (no number): "${address}"`);
+              }
+            }
+          }
+          
+          // Pattern 3: Try to extract address between parcel/owner and years/amount
+          // Look for text that appears after parcel/owner but before years (4-digit numbers)
+          if (!address || address.length === 0) {
+            // Find the parcel/owner section end
+            const parcelOwnerMatch = rowText.match(/(\d{5}[A-Z]\s+[A-Z]\d{3}(?:\s+[A-Z]\d{2})?)\s*\/?([A-Z\s&]+(?:LLC|INC|CORP|JR|SR)?)?/);
+            if (parcelOwnerMatch) {
+              const afterParcelOwner = rowText.substring((parcelOwnerMatch.index || 0) + parcelOwnerMatch[0].length);
+              // Find the next 4-digit year pattern or amount pattern
+              const nextYearOrAmount = afterParcelOwner.match(/(\d{4}(?:,\s*\d{4})*|[\d,]+\.\d{2})/);
+              if (nextYearOrAmount) {
+                const addressSection = afterParcelOwner.substring(0, (nextYearOrAmount.index || 0)).trim();
+                // Extract address from this section
+                const addressInSection = addressSection.match(/(\d*\s*[A-Z][A-Z\s]+(?:DR|RD|ST|AVE|CT|LN|BLVD|PKWY|WAY|CIR|TRCE|VILLAGE|DRIVE|STREET|ROAD|AVENUE|BOULEVARD|PARKWAY|COURT|CIRCLE|BLVD))/i);
+                if (addressInSection) {
+                  address = addressInSection[1].trim();
+                  console.log(`Found address between parcel/owner and years: "${address}"`);
+                }
+              }
+            }
+          }
         }
         
         // Extract Cry-Out Bid (this is the tax amount due)
@@ -512,9 +561,58 @@ export class ClaytonScraper extends BaseScraper {
         }
         
         // Extract address (street address pattern)
-        const addressMatch = rowText.match(/(\d+\s+[A-Z][A-Z\s]+(?:DR|RD|ST|AVE|CT|LN|BLVD|PKWY|WAY|CIR|TRCE|VILLAGE|DRIVE|STREET|ROAD|AVENUE|BOULEVARD|PARKWAY|COURT|CIRCLE))/i);
+        // Try multiple patterns to catch different address formats
+        // Pattern 1: Standard street address with number (e.g., "0 CAMP DR", "1635 LOVEJOY RD")
+        let addressMatch = rowText.match(/(\d+\s+[A-Z][A-Z\s]+(?:DR|RD|ST|AVE|CT|LN|BLVD|PKWY|WAY|CIR|TRCE|VILLAGE|DRIVE|STREET|ROAD|AVENUE|BOULEVARD|PARKWAY|COURT|CIRCLE|BLVD))/i);
         if (addressMatch) {
           address = addressMatch[1].trim();
+          console.log(`Extracted address via pattern (with number): "${address}"`);
+        } else {
+          // Pattern 2: Address without number (e.g., "ATTUCKS BLVD")
+          addressMatch = rowText.match(/([A-Z][A-Z\s]+(?:DR|RD|ST|AVE|CT|LN|BLVD|PKWY|WAY|CIR|TRCE|VILLAGE|DRIVE|STREET|ROAD|AVENUE|BOULEVARD|PARKWAY|COURT|CIRCLE|BLVD))/i);
+          if (addressMatch) {
+            const potentialAddress = addressMatch[1].trim();
+            // Make sure it's not part of the owner name
+            // Find where the parcel/owner section ends
+            const parcelOwnerMatch = rowText.match(/(\d{5}[A-Z]\s+[A-Z]\d{3}(?:\s+[A-Z]\d{2})?)\s*\/?([A-Z\s&]+(?:LLC|INC|CORP|JR|SR)?)?/);
+            if (parcelOwnerMatch) {
+              const parcelOwnerEnd = (parcelOwnerMatch.index || 0) + parcelOwnerMatch[0].length;
+              const addressStart = rowText.indexOf(potentialAddress);
+              // Address should come after parcel/owner section
+              if (addressStart > parcelOwnerEnd) {
+                address = potentialAddress;
+                console.log(`Extracted address via pattern (no number): "${address}"`);
+              }
+            }
+          }
+        }
+        
+        // Pattern 3: Extract address between parcel/owner and years/amount
+        if (!address || address.length === 0) {
+          const parcelOwnerMatch = rowText.match(/(\d{5}[A-Z]\s+[A-Z]\d{3}(?:\s+[A-Z]\d{2})?)\s*\/?([A-Z\s&]+(?:LLC|INC|CORP|JR|SR)?)?/);
+          if (parcelOwnerMatch) {
+            const afterParcelOwner = rowText.substring((parcelOwnerMatch.index || 0) + parcelOwnerMatch[0].length);
+            // Find the next 4-digit year pattern or amount pattern
+            const nextYearOrAmount = afterParcelOwner.match(/(\d{4}(?:,\s*\d{4})*|[\d,]+\.\d{2})/);
+            if (nextYearOrAmount) {
+              const addressSection = afterParcelOwner.substring(0, (nextYearOrAmount.index || 0)).trim();
+              // Extract address from this section - try with number first, then without
+              let addressInSection = addressSection.match(/(\d+\s+[A-Z][A-Z\s]+(?:DR|RD|ST|AVE|CT|LN|BLVD|PKWY|WAY|CIR|TRCE|VILLAGE|DRIVE|STREET|ROAD|AVENUE|BOULEVARD|PARKWAY|COURT|CIRCLE|BLVD))/i);
+              if (!addressInSection) {
+                addressInSection = addressSection.match(/([A-Z][A-Z\s]+(?:DR|RD|ST|AVE|CT|LN|BLVD|PKWY|WAY|CIR|TRCE|VILLAGE|DRIVE|STREET|ROAD|AVENUE|BOULEVARD|PARKWAY|COURT|CIRCLE|BLVD))/i);
+              }
+              if (addressInSection) {
+                address = addressInSection[1].trim();
+                console.log(`Extracted address between parcel/owner and years: "${address}"`);
+              }
+            }
+          }
+        }
+        
+        if (address) {
+          console.log(`Final extracted address: "${address}"`);
+        } else {
+          console.warn(`Could not extract address from row: ${rowText.substring(0, 150)}`);
         }
         
         // Extract Cry-Out Bid (usually the last number with decimals, might have commas)
@@ -531,7 +629,20 @@ export class ClaytonScraper extends BaseScraper {
       }
 
       // Parse address to extract city and zip
-      const { address: parsedAddress, city, zip } = this.parseAddress(address);
+      // If address is empty, try to get it from enrichment later, but still save the record
+      let parsedAddress = "";
+      let city = "";
+      let zip = "";
+      
+      if (address && address.trim().length > 0) {
+        const parsed = this.parseAddress(address);
+        parsedAddress = parsed.address || address.trim(); // Use original if parseAddress returns empty
+        city = parsed.city || "";
+        zip = parsed.zip || "";
+        console.log(`Parsed address: "${parsedAddress}", city: "${city}", zip: "${zip}"`);
+      } else {
+        console.warn(`No address found for parcel ${parcelId}, will try to get from enrichment`);
+      }
 
       return {
         parcel_id: parcelId,
@@ -575,6 +686,26 @@ export class ClaytonScraper extends BaseScraper {
         );
 
         if (result && result.isValid) {
+          // Update the lien's address from the property data if available
+          const propertyData = result.propertyData;
+          if (propertyData) {
+            const propertyAddress = 
+              propertyData.address?.street || null;
+            
+            if (propertyAddress && (!lien.property_address || lien.property_address.trim().length === 0)) {
+              lien.property_address = propertyAddress;
+              console.log(`✅ Updated lien address from enrichment: ${propertyAddress}`);
+            }
+            
+            // Also update city and zip if available
+            if (propertyData.address?.city || propertyData.cityName || propertyData.city) {
+              lien.city = propertyData.address?.city || propertyData.cityName || propertyData.city || lien.city;
+            }
+            if (propertyData.address?.zip || propertyData.zipCode || propertyData.postalCode || propertyData.zip) {
+              lien.zip = propertyData.address?.zip || propertyData.zipCode || propertyData.postalCode || propertyData.zip || lien.zip;
+            }
+          }
+          
           validLiens.push(lien);
         } else {
           console.log(`Skipping lien ${lien.parcel_id}: assessedImprovementValue = 0`);
